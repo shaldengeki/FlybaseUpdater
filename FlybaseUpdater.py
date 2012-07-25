@@ -277,9 +277,9 @@ if len(mysqlLogin) < 2:
   print "MySQL login not found in credentials file."
   exit()
 
-MYSQL_USERNAME = mysqlLogin[0]
-MYSQL_PASSWORD = mysqlLogin[1]
-MYSQL_DATABASE = openCredentialsFile.readline().strip('\n')
+MYSQL_USERNAME = mysqlLogin[0].strip()
+MYSQL_PASSWORD = mysqlLogin[1].strip()
+MYSQL_DATABASE = openCredentialsFile.readline().strip()
 if len(MYSQL_DATABASE) < 1:
   print "Database data not found in credentials file."
   exit()
