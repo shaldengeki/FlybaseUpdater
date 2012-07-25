@@ -35,7 +35,7 @@ import pyparallelcurl
 
 LOOP_EVERY_MINUTES = 15
 PID_FILE = '/var/run/FlybaseUpdater.pid'
-ISOFORM_IMAGE_ROOT_PATH = '/home/guoc/modENCODE/app/public/images/isoforms'
+ISOFORM_IMAGE_ROOT_PATH = '/home/guoc/modENCODE/public/images/isoforms'
 COMMAND_START = 'start'
 COMMAND_STOP = 'stop'
 COMMAND_RESTART = 'restart'
@@ -258,9 +258,9 @@ def updateFlybase():
           parallelcurl.startrequest('http://flybase.org/reports/'+ str(gene[2]) +'.html', compareGeneFlybaseInfo, {'geneDBInfo': geneInfo, 'dbConn': dbConn})
           gene = geneCursor.fetchone()
         parallelcurl.finishallrequests()
-        syslog.syslog(syslog.LOG_NOTICE, "Loop finished. Sleeping for " + str(LOOP_EVERY_MINUTES) + " minutes.")
       except:
         syslog.syslog(syslog.LOG_NOTICE, "Recoverable error:\n" + str(traceback.format_exc()) + "\n")
+      syslog.syslog(syslog.LOG_NOTICE, "Loop finished. Sleeping for " + str(LOOP_EVERY_MINUTES) + " minutes.")
       time.sleep(LOOP_EVERY_MINUTES * 60)
   except:
     syslog.syslog(syslog.LOG_NOTICE, "Fatal error:\n" + str(traceback.format_exc()) + "\n")
