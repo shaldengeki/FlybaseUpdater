@@ -104,17 +104,32 @@ def downloadGeneIsoformImage(image_url, dest_url, gene_id, dbConn):
         chunk = isoform_image.read(CHUNK)
         if not chunk: break
         fp.write(chunk)
-      foo = dbConn.queryDB(u'''UPDATE `transcription_factors` SET `isoform_image_path` = %s WHERE `id` = %s''', [str(os.path.basename(dest_url)), str(gene_id)], newCursor=True)
+    foo = dbConn.queryDB(u'''UPDATE `transcription_factors` SET `isoform_image_path` = %s WHERE `id` = %s''', [str(os.path.basename(dest_url)), str(gene_id)], newCursor=True)
 
   
 def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
   geneDBInfo = params['geneDBInfo']
   dbConn = params['dbConn']
+  
+  if re.search('aggressively', flybase_html) and re.search('mining', flybase_html):
+    syslog.syslog(syslog.LOG_NOTICE, "Rate-limited by Flybase. Pausing for a loop.")
+    time.sleep(LOOP_EVERY_MINUTES * 60)
+    return
 
   # construct a hash of aliases consisting of the common name, gene symbol name, and any "also known as" strings specified on the page.
   geneInfo = {}
   geneInfo['aliases'] = {}
-  symbol = re.search('Symbol\<\/th\>\<td\>\<span\ class\=\"greytext\"\>Dmel\\\<\/span\>(.*?)\<\/td\>', flybase_html)
+  try:
+    symbol = re.search('Symbol\<\/th\>\<td\>\<span\ class\=\"greytext\"\>Dmel\\\<\/span\>(.*?)\<\/td\>', flybase_html)
+  except TypeError:
+    # incomplete read on this page. resort to patched httplib request.
+   while True:
+      try:
+        flybase_html = urllib2.urlopen(flybase_url)
+      except:
+        continue
+      else:
+        break
   if symbol and len(symbol.groups()) > 0:
     geneInfo['name'] = symbol.groups()[0].strip()
     geneInfo['aliases'][geneInfo['name']] = 1
@@ -209,7 +224,7 @@ def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
       else:
         geneDBInfo['isoform_image']['size'] = len(f.read())
         f.close()
-      if geneDBInfo['isoform_image']['size'] != geneInfo['isoform_image']['size']:
+      if int(geneDBInfo['isoform_image']['size']) != int(geneInfo['isoform_image']['size']):
         try:
           os.remove(geneDBInfo['isoform_image']['url'])
         except (IOError, OSError):
@@ -224,17 +239,18 @@ def updateFlybase():
   Updates genes in a MySQL database with Flybase info.
   '''
   syslog.openlog("FlybaseUpdater.info", 0, syslog.LOG_USER)
+      syslog.syslog(syslog.LOG_NOTICE, "Starting up.")
   try:
     dbConn = DbConn(MYSQL_USERNAME, MYSQL_PASSWORD, MYSQL_DATABASE)
     if not dbConn:
-      syslog.syslog(syslog.LOG_NOTICE, "Unable to connect to MySQL.")
+      syslog.syslog(syslog.LOG_NOTICE, "Unable to connect to MySQL. Exiting.")
       return
       
     # Now loop every N minutes, updating flybase info.
     while 1:
       try:
         loopStartTime = time.time()
-        parallelcurl = pyparallelcurl.ParallelCurl(20)
+        parallelcurl = pyparallelcurl.ParallelCurl(1)
         # load all genes (along with alias lists) into memory.
         geneCursor = dbConn.queryDB(u'''SELECT `id`, `name`, `flybase_id`, `cg_id`, `isoform_image_path` FROM `transcription_factors` WHERE (`flybase_id` IS NOT NULL && `flybase_id` != '')''')
         gene = geneCursor.fetchone()
