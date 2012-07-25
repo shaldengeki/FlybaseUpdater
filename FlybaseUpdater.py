@@ -35,7 +35,7 @@ import pyparallelcurl
 
 LOOP_EVERY_MINUTES = 15
 PID_FILE = '/var/run/FlybaseUpdater.pid'
-ISOFORM_IMAGE_ROOT_PATH = '/home/guoc/modENCODE/app/assets/images/isoforms'
+ISOFORM_IMAGE_ROOT_PATH = '/home/guoc/modENCODE/app/public/images/isoforms'
 COMMAND_START = 'start'
 COMMAND_STOP = 'stop'
 COMMAND_RESTART = 'restart'
