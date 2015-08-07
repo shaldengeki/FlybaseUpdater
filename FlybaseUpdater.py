@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+# !/usr/bin/env python2.7
 
 ''' FlybaseUpdater - Updates Flybase information for genes.
     Author - Shal Dengeki <shaldengeki@gmail.com>
@@ -111,28 +111,39 @@ def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
   geneDBInfo = params['geneDBInfo']
   dbConn = params['dbConn']
   
-  if re.search('aggressively', flybase_html) and re.search('mining', flybase_html):
-    syslog.syslog(syslog.LOG_NOTICE, "Rate-limited by Flybase. Pausing for a loop.")
-    time.sleep(LOOP_EVERY_MINUTES * 60)
-    return
-
+  syslog.syslog(syslog.LOG_DEBUG, "Comparing Flybase info.")
+  
   # construct a hash of aliases consisting of the common name, gene symbol name, and any "also known as" strings specified on the page.
   geneInfo = {}
   geneInfo['aliases'] = {}
+  syslog.syslog(syslog.LOG_DEBUG, "Fetching symbol.")
   try:
     symbol = re.search('Symbol\<\/th\>\<td\>\<span\ class\=\"greytext\"\>Dmel\\\<\/span\>(.*?)\<\/td\>', flybase_html)
   except TypeError:
     # incomplete read on this page. resort to patched httplib request.
    while True:
       try:
-        flybase_html = urllib2.urlopen(flybase_url)
+        syslog.syslog(syslog.LOG_DEBUG, "Fetching Flybase URL in serial.")
+        flybase_html = urllib2.urlopen(flybase_url).read()
       except:
         continue
       else:
+        symbol = re.search('Symbol\<\/th\>\<td\>\<span\ class\=\"greytext\"\>Dmel\\\<\/span\>(.*?)\<\/td\>', flybase_html)
         break
+  if not flybase_html:
+    # something went wrong in our page request.
+    syslog.syslog(syslog.LOG_DEBUG, "Improper Flybase HTML. Skipping.")
+    return
+  # check to see if we've been rate-limited.
+  if re.search('aggressively', flybase_html) and re.search('mining', flybase_html):
+    syslog.syslog(syslog.LOG_NOTICE, "Rate-limited by Flybase. Pausing for a loop.")
+    time.sleep(LOOP_EVERY_MINUTES * 60)
+    return
+
   if symbol and len(symbol.groups()) > 0:
     geneInfo['name'] = symbol.groups()[0].strip()
     geneInfo['aliases'][geneInfo['name']] = 1
+  syslog.syslog(syslog.LOG_DEBUG, "Fetching aliases.")
   akas = re.search('Also\ Known\ As\<\/th\>\<td\ colspan\=\"3\"\>(.*?)\<\/td\>', flybase_html)
   if akas and len(akas.groups()) > 0:
     for item in akas.groups()[0].split(", "):
@@ -149,16 +160,18 @@ def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
   aliasInsertQuery = []
   for x in range(len(aliasesToInsert)/2):
     aliasInsertQuery.append("(%s, %s)")
+  syslog.syslog(syslog.LOG_DEBUG, "Inserting aliases.")
   if len(aliasInsertQuery) > 0:
     foo = dbConn.queryDB(u'''INSERT IGNORE INTO `aliases` (`name`, `transcription_factor_id`) VALUES ''' + ",".join(aliasInsertQuery), aliasesToInsert, newCursor=True)
-    # syslog.syslog(syslog.LOG_NOTICE, "Inserted " + str(len(aliasesToInsert)/2) + " aliases.")
+    syslog.syslog(syslog.LOG_NOTICE, "Inserted " + str(len(aliasesToInsert)/2) + " aliases.")
   
   if len(aliasesToDelete) > 0:
     foo = dbConn.queryDB(u'''DELETE FROM `aliases` WHERE `id` IN (''' + ",".join(['%s' for x in aliasesToDelete]) + ''')''', aliasesToDelete, newCursor=True)
-    # syslog.syslog(syslog.LOG_NOTICE, "Deleted " + str(len(aliasesToDelete)) + " aliases.")
+    syslog.syslog(syslog.LOG_NOTICE, "Deleted " + str(len(aliasesToDelete)) + " aliases.")
   
   # construct a hash of hashes of isoforms and their external IDs.
   geneInfo['isoforms'] = {}
+  syslog.syslog(syslog.LOG_DEBUG, "Fetching isoforms.")
   gene_isoform_table = re.search('\(aa\)</div></div></div></div></div>(.*?)</td></tr>', flybase_html, flags=re.DOTALL)
   if gene_isoform_table and len(gene_isoform_table.groups()) > 0:
     for item in gene_isoform_table.groups()[0].split("<div class=\"line-wrapper\">"):
@@ -185,21 +198,25 @@ def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
       geneInfo['isoforms'][isoformName]['id'] = geneDBInfo['isoforms'][isoformName]['id']
       if geneInfo['isoforms'][isoformName] != geneDBInfo['isoforms'][isoformName]:
         # update the DB with Flybase's info.
+        syslog.syslog(syslog.LOG_DEBUG, "Updating isoform.")
         foo = dbConn.queryDB(u'''UPDATE `isoforms` SET `flybase_id` = %s, `refseq_id` = %s WHERE `id` = %s LIMIT 1''', [str(geneInfo['isoforms'][isoformName]['flybase_id']), str(geneInfo['isoforms'][isoformName]['refseq_id']), str(geneDBInfo['isoforms'][isoformName]['id'])], newCursor=True)
   isoformInsertQuery = []
   for x in range(len(isoformsToInsert)/4):
     isoformInsertQuery.append("(%s, %s, %s, %s)")
+  syslog.syslog(syslog.LOG_DEBUG, "Inserting isoforms.")
   if len(isoformInsertQuery) > 0:
     foo = dbConn.queryDB(u'''INSERT IGNORE INTO `isoforms` (`name`, `transcription_factor_id`, `flybase_id`, `refseq_id`) VALUES ''' + ",".join(isoformInsertQuery), isoformsToInsert, newCursor=True)
-    # syslog.syslog(syslog.LOG_NOTICE, "Inserted " + str(len(isoformsToInsert)/4) + " isoforms.")
+    syslog.syslog(syslog.LOG_NOTICE, "Inserted " + str(len(isoformsToInsert)/4) + " isoforms.")
   
+  syslog.syslog(syslog.LOG_DEBUG, "Deleting isoforms.")
   if len(isoformsToDelete) > 0:
     foo = dbConn.queryDB(u'''DELETE FROM `isoforms` WHERE `id` IN (''' + ",".join(['%s' for x in isoformsToDelete]) + ''')''', isoformsToDelete, newCursor=True)
-    # syslog.syslog(syslog.LOG_NOTICE, "Deleted " + str(len(isoformsToDelete)) + " isoforms.")
+    syslog.syslog(syslog.LOG_NOTICE, "Deleted " + str(len(isoformsToDelete)) + " isoforms.")
   
   # get isoform image size and url.
   geneInfo['isoform_image'] = {'url': '', 'size': 0}
   geneDBInfo['isoform_image'] = {'url': os.path.join(ISOFORM_IMAGE_ROOT_PATH, geneDBInfo['isoform_image_path']), 'size': 0}
+  syslog.syslog(syslog.LOG_DEBUG, "Fetching isoform image.")
   isoform_image_path = re.search('class\=\"noborder\-line\-wrapper\"><img\ align\=\"middle\"\ alt\=\"detailed view\"\ width\=\"[0-9]+\"\ name\=\"detailedView\"\ height\=\"[0-9]+\"\ border\=\"0\"\ src\=\"(.*?)\"\ usemap', flybase_html)
   if isoform_image_path:
     geneInfo['isoform_image']['url'] = "".join(['http://flybase.org',isoform_image_path.groups()[0]])
@@ -213,8 +230,9 @@ def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
       except (IOError, OSError):
         pass
       geneDBInfo['isoform_image']['url'] = os.path.join(ISOFORM_IMAGE_ROOT_PATH, os.path.basename(geneInfo['isoform_image']['url']))
+      syslog.syslog(syslog.LOG_DEBUG, "Downloading isoform image.")
       downloadGeneIsoformImage(geneInfo['isoform_image']['url'], geneDBInfo['isoform_image']['url'], geneDBInfo['id'], dbConn)
-      # syslog.syslog(syslog.LOG_NOTICE, "Downloaded an updated isoform image.")
+      syslog.syslog(syslog.LOG_NOTICE, "Downloaded an updated isoform image.")
     else:
       # get isoform image size on disk (if one exists).
       try:
@@ -230,8 +248,10 @@ def compareGeneFlybaseInfo(flybase_html, flybase_url, ch, params):
         except (IOError, OSError):
           pass
         geneDBInfo['isoform_image']['url'] = os.path.join(ISOFORM_IMAGE_ROOT_PATH, os.path.basename(geneInfo['isoform_image']['url']))
+        syslog.syslog(syslog.LOG_DEBUG, "Downloading isoform image.")
         downloadGeneIsoformImage(geneInfo['isoform_image']['url'], geneDBInfo['isoform_image']['url'], geneDBInfo['id'], dbConn)
-        # syslog.syslog(syslog.LOG_NOTICE, "Downloaded an updated isoform image.")
+        syslog.syslog(syslog.LOG_NOTICE, "Downloaded an updated isoform image.")
+  syslog.syslog(syslog.LOG_DEBUG, "Finished comparing info.")
 
 
 def updateFlybase():
@@ -239,19 +259,22 @@ def updateFlybase():
   Updates genes in a MySQL database with Flybase info.
   '''
   syslog.openlog("FlybaseUpdater.info", 0, syslog.LOG_USER)
-      syslog.syslog(syslog.LOG_NOTICE, "Starting up.")
+  syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_NOTICE))
+  syslog.syslog(syslog.LOG_NOTICE, "Starting up.")
   try:
     dbConn = DbConn(MYSQL_USERNAME, MYSQL_PASSWORD, MYSQL_DATABASE)
     if not dbConn:
-      syslog.syslog(syslog.LOG_NOTICE, "Unable to connect to MySQL. Exiting.")
+      syslog.syslog(syslog.LOG_CRIT, "Unable to connect to MySQL. Exiting.")
       return
       
     # Now loop every N minutes, updating flybase info.
     while 1:
+      syslog.syslog(syslog.LOG_DEBUG, "Starting a loop.")
       try:
         loopStartTime = time.time()
         parallelcurl = pyparallelcurl.ParallelCurl(1)
         # load all genes (along with alias lists) into memory.
+        syslog.syslog(syslog.LOG_DEBUG, "Loading gene info.")
         geneCursor = dbConn.queryDB(u'''SELECT `id`, `name`, `flybase_id`, `cg_id`, `isoform_image_path` FROM `transcription_factors` WHERE (`flybase_id` IS NOT NULL && `flybase_id` != '')''')
         gene = geneCursor.fetchone()
         while gene is not None:
@@ -271,15 +294,16 @@ def updateFlybase():
             isoform = geneIsoformQuery.fetchone()
           
           # submit this request to parallelcurl object to be compared.
+          syslog.syslog(syslog.LOG_DEBUG, "Submitting request for " + gene[1])
           parallelcurl.startrequest('http://flybase.org/reports/'+ str(gene[2]) +'.html', compareGeneFlybaseInfo, {'geneDBInfo': geneInfo, 'dbConn': dbConn})
           gene = geneCursor.fetchone()
         parallelcurl.finishallrequests()
       except:
-        syslog.syslog(syslog.LOG_NOTICE, "Recoverable error:\n" + str(traceback.format_exc()) + "\n")
+        syslog.syslog(syslog.LOG_ERR, "Recoverable error:\n" + str("".join(traceback.format_exc())) + "\n")
       syslog.syslog(syslog.LOG_NOTICE, "Loop finished. Sleeping for " + str(LOOP_EVERY_MINUTES) + " minutes.")
       time.sleep(LOOP_EVERY_MINUTES * 60)
   except:
-    syslog.syslog(syslog.LOG_NOTICE, "Fatal error:\n" + str(traceback.format_exc()) + "\n")
+    syslog.syslog(syslog.LOG_CRIT, "Fatal error:\n" + str("".join(traceback.format_exc())) + "\n")
 
 # Invalid executions
 if len(sys.argv) < 2 or sys.argv[1] not in [COMMAND_START, COMMAND_STOP, COMMAND_RESTART]:
@@ -313,7 +337,7 @@ if sys.argv[1] == COMMAND_START:
   if retcode == yapdi.OPERATION_SUCCESSFUL:
     updateFlybase()
   else:
-    syslog.syslog(syslog.LOG_NOTICE, 'Daemonization failed')
+    syslog.syslog(syslog.LOG_CRIT, 'Daemonization failed')
 
 elif sys.argv[1] == COMMAND_STOP:
   daemon = yapdi.Daemon(pidfile=PID_FILE)
